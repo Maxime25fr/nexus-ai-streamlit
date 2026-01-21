@@ -97,26 +97,13 @@ MODEL_MAPPING = {
     "Llama 2 70B": "meta-llama/llama-2-70b-chat"
 }
 
-def call_openrouter_api(messages: list, model_name: str, temperature: float, max_tokens: int) -> Optional[str]:
-    """Appelle l'API OpenRouter avec le modèle spécifié."""
+# URL du serveur proxy (à configurer)
+PROXY_URL = os.getenv("PROXY_URL", "http://localhost:5000")
+
+def call_openrouter_via_proxy(messages: list, model_name: str, temperature: float, max_tokens: int) -> Optional[str]:
+    """Appelle OpenRouter via le serveur proxy."""
     try:
-        # Récupérer la clé API
-        api_key = st.secrets.get("OPENROUTER_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "")
-        
-        if not api_key:
-            st.error("❌ Clé API OpenRouter non configurée. Veuillez ajouter OPENROUTER_API_KEY dans les secrets Streamlit Cloud.")
-            return None
-        
-        # Récupérer le modèle OpenRouter
         model_id = MODEL_MAPPING.get(model_name, "deepseek/deepseek-chat")
-        
-        # Préparer les headers
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "HTTP-Referer": "https://nexus-ai-streamlit.streamlit.app/",
-            "X-Title": "Nexus AI Assistant",
-            "Content-Type": "application/json"
-        }
         
         # Préparer les messages
         api_messages = []
@@ -132,38 +119,32 @@ def call_openrouter_api(messages: list, model_name: str, temperature: float, max
             "model": model_id,
             "messages": api_messages,
             "temperature": temperature,
-            "max_tokens": int(max_tokens),
-            "top_p": 1,
-            "frequency_penalty": 0,
-            "presence_penalty": 0
+            "max_tokens": int(max_tokens)
         }
         
-        # Faire la requête
+        # Faire la requête au proxy
         response = requests.post(
-            "https://openrouter.io/api/v1/chat/completions",
-            headers=headers,
+            f"{PROXY_URL}/api/chat",
             json=payload,
             timeout=30
         )
         
-        # Vérifier la réponse
         if response.status_code == 200:
             data = response.json()
-            if "choices" in data and len(data["choices"]) > 0:
-                return data["choices"][0]["message"]["content"]
+            if data.get("success"):
+                return data.get("content")
             else:
-                st.error(f"❌ Erreur API: Réponse invalide")
+                st.error(f"❌ Erreur: {data.get('error')}")
                 return None
         else:
-            error_msg = response.text
-            st.error(f"❌ Erreur API ({response.status_code}): {error_msg}")
+            st.error(f"❌ Erreur du serveur proxy ({response.status_code})")
             return None
             
     except requests.exceptions.Timeout:
         st.error("❌ Timeout: La requête a pris trop de temps.")
         return None
     except requests.exceptions.ConnectionError:
-        st.error("❌ Erreur de connexion: Impossible de contacter l'API OpenRouter.")
+        st.error(f"❌ Impossible de contacter le serveur proxy à {PROXY_URL}")
         return None
     except Exception as e:
         st.error(f"❌ Erreur: {str(e)}")
@@ -332,9 +313,9 @@ else:
                 "content": message
             })
             
-            # Appeler l'API OpenRouter
+            # Appeler l'API via le proxy
             with st.spinner("⏳ Traitement en cours..."):
-                response = call_openrouter_api(conv["messages"], conv["model"], temperature, max_tokens)
+                response = call_openrouter_via_proxy(conv["messages"], conv["model"], temperature, max_tokens)
             
             if response:
                 # Ajouter la réponse IA
