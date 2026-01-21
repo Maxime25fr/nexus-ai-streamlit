@@ -2,10 +2,7 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
-import base64
-from io import BytesIO
-import http.client
-import urllib.parse
+import requests
 
 # Configuration de la page
 st.set_page_config(
@@ -93,9 +90,14 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Fonction pour appeler OpenRouter API
+@st.cache_data
+def get_api_key():
+    """Récupère la clé API depuis les secrets."""
+    return st.secrets.get("OPENROUTER_API_KEY", "")
+
 def call_openrouter(messages, model, temperature, max_tokens):
     """Appelle l'API OpenRouter avec les paramètres donnés."""
-    api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    api_key = get_api_key()
     
     if not api_key:
         return None, "❌ Clé API OpenRouter non configurée. Veuillez ajouter OPENROUTER_API_KEY dans les secrets Streamlit Cloud."
@@ -118,8 +120,6 @@ def call_openrouter(messages, model, temperature, max_tokens):
             "max_tokens": max_tokens
         }
         
-        # Faire la requête HTTP
-        conn = http.client.HTTPSConnection("openrouter.io")
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
@@ -127,23 +127,34 @@ def call_openrouter(messages, model, temperature, max_tokens):
             "X-Title": "Nexus AI Assistant"
         }
         
-        import json as json_module
-        body = json_module.dumps(payload)
+        # Faire la requête
+        response = requests.post(
+            "https://openrouter.io/api/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=30
+        )
         
-        conn.request("POST", "/api/v1/chat/completions", body, headers)
-        response = conn.getresponse()
-        response_data = response.read().decode()
+        if response.status_code != 200:
+            error_text = response.text
+            try:
+                error_json = response.json()
+                error_message = error_json.get("error", {}).get("message", error_text)
+            except:
+                error_message = error_text
+            return None, f"❌ Erreur API ({response.status_code}): {error_message}"
         
-        if response.status != 200:
-            return None, f"❌ Erreur API ({response.status}): {response_data}"
-        
-        result = json_module.loads(response_data)
+        result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
             return result["choices"][0]["message"]["content"], None
         else:
             return None, "❌ Réponse API invalide"
             
+    except requests.exceptions.Timeout:
+        return None, "❌ Timeout: La requête a pris trop de temps"
+    except requests.exceptions.ConnectionError:
+        return None, "❌ Erreur de connexion: Impossible de contacter l'API OpenRouter"
     except Exception as e:
         return None, f"❌ Erreur: {str(e)}"
 
