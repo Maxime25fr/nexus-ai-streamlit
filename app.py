@@ -4,6 +4,8 @@ import os
 from datetime import datetime
 import base64
 from io import BytesIO
+import http.client
+import urllib.parse
 
 # Configuration de la page
 st.set_page_config(
@@ -89,6 +91,61 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# Fonction pour appeler OpenRouter API
+def call_openrouter(messages, model, temperature, max_tokens):
+    """Appelle l'API OpenRouter avec les paramètres donnés."""
+    api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    
+    if not api_key:
+        return None, "❌ Clé API OpenRouter non configurée. Veuillez ajouter OPENROUTER_API_KEY dans les secrets Streamlit Cloud."
+    
+    # Mapping des modèles
+    model_mapping = {
+        "DeepSeek Chat": "deepseek/deepseek-chat",
+        "Molmo 2 8B": "allenai/molmo-2-8b:free",
+        "Llama 2 70B": "meta-llama/llama-2-70b-chat"
+    }
+    
+    model_id = model_mapping.get(model, "deepseek/deepseek-chat")
+    
+    try:
+        # Préparer les données
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+        
+        # Faire la requête HTTP
+        conn = http.client.HTTPSConnection("openrouter.io")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://streamlit.app",
+            "X-Title": "Nexus AI Assistant"
+        }
+        
+        import json as json_module
+        body = json_module.dumps(payload)
+        
+        conn.request("POST", "/api/v1/chat/completions", body, headers)
+        response = conn.getresponse()
+        response_data = response.read().decode()
+        
+        if response.status != 200:
+            return None, f"❌ Erreur API ({response.status}): {response_data}"
+        
+        result = json_module.loads(response_data)
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"], None
+        else:
+            return None, "❌ Réponse API invalide"
+            
+    except Exception as e:
+        return None, f"❌ Erreur: {str(e)}"
 
 # Initialisation de la session
 if "conversations" not in st.session_state:
@@ -253,13 +310,21 @@ else:
                 "content": message
             })
             
-            # Simuler une réponse IA
-            st.info("⏳ Traitement en cours... (Fonctionnalité en développement)")
+            # Préparer les messages pour l'API
+            api_messages = [{"role": msg["role"], "content": msg["content"]} for msg in conv["messages"]]
             
-            # Pour le moment, afficher un message de placeholder
-            conv["messages"].append({
-                "role": "assistant",
-                "content": "Merci pour votre message ! La fonctionnalité de chat est actuellement en développement. Veuillez vérifier que votre clé API OpenRouter est correctement configurée dans les secrets Streamlit Cloud."
-            })
+            # Appeler l'API OpenRouter
+            with st.spinner("⏳ Traitement en cours..."):
+                response, error = call_openrouter(api_messages, conv["model"], temperature, max_tokens)
             
-            st.rerun()
+            if error:
+                st.error(error)
+            elif response:
+                # Ajouter la réponse IA
+                conv["messages"].append({
+                    "role": "assistant",
+                    "content": response
+                })
+                st.rerun()
+            else:
+                st.error("❌ Erreur lors de l'appel API")
