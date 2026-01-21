@@ -2,7 +2,8 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
-import random
+import requests
+from typing import Optional
 
 # Configuration de la page
 st.set_page_config(
@@ -89,24 +90,56 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Réponses pré-générées pour les tests
-SAMPLE_RESPONSES = {
-    "DeepSeek Chat": [
-        "Salut ! Je vais bien, merci de demander ! 😊 Comment puis-je t'aider aujourd'hui ?",
-        "Coucou ! Je suis en excellente forme. Je suis prêt à répondre à tes questions et à t'aider avec n'importe quel sujet. Qu'est-ce qui t'intéresse ?",
-        "Bonjour ! Ça va très bien de mon côté. Je suis un assistant IA basé sur DeepSeek, spécialisé dans les conversations naturelles et le raisonnement complexe. Comment puis-je t'assister ?",
-    ],
-    "Molmo 2 8B": [
-        "Salut ! Je suis Molmo, un modèle de vision multimodal. Je peux analyser des images et répondre à des questions à leur sujet. Je vais bien, merci ! 👁️",
-        "Coucou ! Je suis spécialisé dans l'analyse d'images et la compréhension visuelle. Je vais très bien et je suis prêt à analyser des images pour toi !",
-        "Bonjour ! Je suis Molmo 2 8B, un modèle de vision avancé. Je peux interpréter des images, répondre à des questions visuelles et bien plus. Comment ça va pour toi ?",
-    ],
-    "Llama 2 70B": [
-        "Salut ! Je suis Llama 2 70B, un grand modèle de langage très puissant. Je vais bien et je suis prêt à avoir une conversation profonde avec toi ! 🦙",
-        "Coucou ! Avec mes 70 milliards de paramètres, je suis capable de traiter des sujets complexes et nuancés. Je vais très bien, merci de demander !",
-        "Bonjour ! Je suis Llama 2 70B, l'un des plus grands modèles de langage disponibles. Je vais excellent et je suis enthousiaste de discuter avec toi !",
-    ]
-}
+# Fonction pour appeler OpenRouter API
+def call_openrouter_api(messages: list, model: str, temperature: float, max_tokens: int) -> Optional[str]:
+    """Appelle l'API OpenRouter avec les paramètres donnés."""
+    api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    
+    if not api_key:
+        return None
+    
+    # Mapping des modèles
+    model_mapping = {
+        "DeepSeek Chat": "deepseek/deepseek-chat",
+        "Molmo 2 8B": "allenai/molmo-2-8b:free",
+        "Llama 2 70B": "meta-llama/llama-2-70b-chat"
+    }
+    
+    model_id = model_mapping.get(model, "deepseek/deepseek-chat")
+    
+    try:
+        # Préparer les données
+        payload = {
+            "model": model_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": int(max_tokens)
+        }
+        
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://streamlit.app",
+            "X-Title": "Nexus AI Assistant"
+        }
+        
+        # Faire la requête avec timeout
+        response = requests.post(
+            "https://openrouter.io/api/v1/chat/completions",
+            json=payload,
+            headers=headers,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            if "choices" in result and len(result["choices"]) > 0:
+                return result["choices"][0]["message"]["content"]
+        
+        return None
+            
+    except Exception as e:
+        return None
 
 # Initialisation de la session
 if "conversations" not in st.session_state:
@@ -271,19 +304,19 @@ else:
                 "content": message
             })
             
-            # Générer une réponse IA
-            with st.spinner("⏳ Traitement en cours..."):
-                # Simuler un délai de traitement
-                import time
-                time.sleep(1)
-                
-                # Obtenir une réponse aléatoire basée sur le modèle
-                responses = SAMPLE_RESPONSES.get(conv["model"], SAMPLE_RESPONSES["DeepSeek Chat"])
-                response = random.choice(responses)
+            # Préparer les messages pour l'API
+            api_messages = [{"role": msg["role"], "content": msg["content"]} for msg in conv["messages"]]
             
-            # Ajouter la réponse IA
-            conv["messages"].append({
-                "role": "assistant",
-                "content": response
-            })
-            st.rerun()
+            # Appeler l'API OpenRouter
+            with st.spinner("⏳ Traitement en cours..."):
+                response = call_openrouter_api(api_messages, conv["model"], temperature, max_tokens)
+            
+            if response:
+                # Ajouter la réponse IA
+                conv["messages"].append({
+                    "role": "assistant",
+                    "content": response
+                })
+                st.rerun()
+            else:
+                st.error("❌ Erreur lors de l'appel API OpenRouter. Vérifiez que votre clé API est configurée dans les secrets Streamlit Cloud.")
