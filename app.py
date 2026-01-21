@@ -6,6 +6,8 @@ import json
 import os
 from datetime import datetime
 import re
+import urllib.request
+import urllib.error
 
 # Configuration de la page
 st.set_page_config(
@@ -146,16 +148,21 @@ def call_openrouter(messages, model_id, temperature=0.7, max_tokens=2000):
     }
     
     try:
-        response = requests.post(
+        data = json.dumps(payload).encode('utf-8')
+        req = urllib.request.Request(
             "https://openrouter.io/api/v1/chat/completions",
+            data=data,
             headers=headers,
-            json=payload,
-            timeout=30
+            method="POST"
         )
-        response.raise_for_status()
-        return response.json()["choices"][0]["message"]["content"]
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ Erreur API: {str(e)}")
+        with urllib.request.urlopen(req, timeout=30) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            return result["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        st.error(f"❌ Erreur API: {e.code} {e.reason}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Erreur: {str(e)}")
         return None
 
 def save_conversations():
