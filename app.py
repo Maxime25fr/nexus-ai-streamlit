@@ -133,7 +133,8 @@ def call_openrouter(messages, model_id, temperature=0.7, max_tokens=2000):
     headers = {
         "Authorization": f"Bearer {api_key}",
         "HTTP-Referer": "https://streamlit.io",
-        "X-Title": "Nexus AI Assistant"
+        "X-Title": "Nexus AI Assistant",
+        "Content-Type": "application/json"
     }
     
     payload = {
