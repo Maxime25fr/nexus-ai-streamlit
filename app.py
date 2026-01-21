@@ -3,7 +3,7 @@ import json
 import os
 from datetime import datetime
 from typing import Optional
-import anthropic
+import requests
 
 # Configuration de la page
 st.set_page_config(
@@ -90,76 +90,84 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Fonction pour appeler Claude API (alternative à OpenRouter)
-def call_claude_api(messages: list, model: str, temperature: float, max_tokens: int) -> Optional[str]:
-    """Appelle Claude API comme alternative à OpenRouter."""
+# Mapping des modèles OpenRouter
+MODEL_MAPPING = {
+    "DeepSeek Chat": "deepseek/deepseek-chat",
+    "Molmo 2 8B": "allenai/molmo-2-8b:free",
+    "Llama 2 70B": "meta-llama/llama-2-70b-chat"
+}
+
+def call_openrouter_api(messages: list, model_name: str, temperature: float, max_tokens: int) -> Optional[str]:
+    """Appelle l'API OpenRouter avec le modèle spécifié."""
     try:
-        api_key = st.secrets.get("ANTHROPIC_API_KEY", "") or os.getenv("ANTHROPIC_API_KEY", "")
+        # Récupérer la clé API
+        api_key = st.secrets.get("OPENROUTER_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "")
         
         if not api_key:
-            # Utiliser une réponse simulée si pas de clé
-            return generate_simulated_response(messages, model)
+            st.error("❌ Clé API OpenRouter non configurée. Veuillez ajouter OPENROUTER_API_KEY dans les secrets Streamlit Cloud.")
+            return None
         
-        client = anthropic.Anthropic(api_key=api_key)
+        # Récupérer le modèle OpenRouter
+        model_id = MODEL_MAPPING.get(model_name, "deepseek/deepseek-chat")
         
-        # Convertir les messages au format Claude
-        claude_messages = []
+        # Préparer les headers
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://nexus-ai-streamlit.streamlit.app/",
+            "X-Title": "Nexus AI Assistant",
+            "Content-Type": "application/json"
+        }
+        
+        # Préparer les messages
+        api_messages = []
         for msg in messages:
-            if msg["role"] != "system":
-                claude_messages.append({
+            if msg["role"] in ["user", "assistant"]:
+                api_messages.append({
                     "role": msg["role"],
                     "content": msg["content"]
                 })
         
-        response = client.messages.create(
-            model="claude-3-5-sonnet-20241022",
-            max_tokens=int(max_tokens),
-            temperature=temperature,
-            messages=claude_messages
+        # Préparer le payload
+        payload = {
+            "model": model_id,
+            "messages": api_messages,
+            "temperature": temperature,
+            "max_tokens": int(max_tokens),
+            "top_p": 1,
+            "frequency_penalty": 0,
+            "presence_penalty": 0
+        }
+        
+        # Faire la requête
+        response = requests.post(
+            "https://openrouter.io/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
         )
         
-        return response.content[0].text
-        
+        # Vérifier la réponse
+        if response.status_code == 200:
+            data = response.json()
+            if "choices" in data and len(data["choices"]) > 0:
+                return data["choices"][0]["message"]["content"]
+            else:
+                st.error(f"❌ Erreur API: Réponse invalide")
+                return None
+        else:
+            error_msg = response.text
+            st.error(f"❌ Erreur API ({response.status_code}): {error_msg}")
+            return None
+            
+    except requests.exceptions.Timeout:
+        st.error("❌ Timeout: La requête a pris trop de temps.")
+        return None
+    except requests.exceptions.ConnectionError:
+        st.error("❌ Erreur de connexion: Impossible de contacter l'API OpenRouter.")
+        return None
     except Exception as e:
-        # Fallback sur réponses simulées
-        return generate_simulated_response(messages, model)
-
-def generate_simulated_response(messages: list, model: str) -> str:
-    """Génère des réponses simulées réalistes basées sur le modèle."""
-    if not messages:
-        return "Bonjour ! Comment puis-je vous aider ?"
-    
-    last_message = messages[-1]["content"].lower()
-    
-    responses = {
-        "DeepSeek Chat": {
-            "qui es-tu": "Je suis DeepSeek Chat, un assistant IA avancé créé par DeepSeek. Je suis conçu pour avoir des conversations naturelles et aider avec diverses tâches. Mon architecture est optimisée pour la compréhension et la génération de texte de haute qualité.",
-            "bonjour": "Bonjour ! Je suis DeepSeek Chat. Je suis ravi de vous rencontrer. Comment puis-je vous assister aujourd'hui ?",
-            "blague": "Pourquoi les plongeurs plongent-ils toujours en arrière et jamais en avant ? Parce que sinon ils tombent dans le bateau ! 😄",
-            "default": "Je suis DeepSeek Chat, un modèle de langage avancé. Je peux vous aider avec diverses tâches comme répondre à des questions, écrire du contenu, analyser des informations, et bien plus encore."
-        },
-        "Molmo 2 8B": {
-            "qui es-tu": "Je suis Molmo 2 8B, un modèle de vision multimodal créé par Allen AI. Je suis spécialisé dans l'analyse d'images et la compréhension du contenu visuel. Je peux décrire des images, répondre à des questions sur des images, et bien plus.",
-            "bonjour": "Salut ! Je suis Molmo 2 8B. Je suis particulièrement bon pour analyser et comprendre les images. Vous pouvez me poser des questions sur des images ou me demander de les décrire.",
-            "blague": "Qu'est-ce qu'un pixel qui dit à un autre pixel ? 'Tu es vraiment transparent avec moi !' 😄",
-            "default": "Je suis Molmo 2 8B, un modèle de vision multimodal. Je peux analyser des images, répondre à des questions sur leur contenu, et vous aider à comprendre des données visuelles."
-        },
-        "Llama 2 70B": {
-            "qui es-tu": "Je suis Llama 2 70B, un grand modèle de langage créé par Meta. Je suis l'un des plus grands modèles open-source disponibles. Je peux vous aider avec une large gamme de tâches, de la rédaction à l'analyse en passant par la programmation.",
-            "bonjour": "Bonjour ! Je suis Llama 2 70B, un puissant modèle de langage. Je suis ici pour vous aider avec vos questions et vos besoins. Qu'y a-t-il pour vous ?",
-            "blague": "Pourquoi les développeurs préfèrent-ils les boucles infinies ? Parce qu'ils adorent les choses qui tournent en rond ! 😄",
-            "default": "Je suis Llama 2 70B, un grand modèle de langage open-source. Je peux vous aider avec une variété de tâches incluant la rédaction, l'analyse, la programmation, et bien d'autres domaines."
-        }
-    }
-    
-    model_responses = responses.get(model, responses["DeepSeek Chat"])
-    
-    # Chercher une réponse correspondante
-    for keyword, response in model_responses.items():
-        if keyword in last_message and keyword != "default":
-            return response
-    
-    return model_responses.get("default", "Je suis un assistant IA. Comment puis-je vous aider ?")
+        st.error(f"❌ Erreur: {str(e)}")
+        return None
 
 # Initialisation de la session
 if "conversations" not in st.session_state:
@@ -220,12 +228,12 @@ with st.sidebar:
     
     **Nexus AI Assistant** est une plateforme IA multimodale complète avec :
     
-    - 🤖 Support de 3 modèles IA puissants
+    - 🤖 Support de 3 modèles IA puissants d'OpenRouter
     - 🎨 Analyse d'images avec Molmo 2 8B
     - 💾 Historique persistant des conversations
     - 📥 Export en Markdown ou Texte
     - 🎨 Design premium avec interface néon
-    - ✨ 100% Gratuit
+    - ✨ 100% Gratuit (modèles OpenRouter gratuits)
     
     **Comment utiliser :**
     1. Cliquez sur "Nouveau Chat" pour démarrer
@@ -245,7 +253,7 @@ if st.session_state.current_conversation is None:
     
     Une plateforme IA multimodale complète avec :
     
-    - ✅ Support de 3 modèles IA puissants
+    - ✅ Support de 3 modèles IA puissants d'OpenRouter
     - ✅ Analyse d'images avec Molmo 2 8B
     - ✅ Historique persistant des conversations
     - ✅ Export en Markdown ou Texte
@@ -324,12 +332,9 @@ else:
                 "content": message
             })
             
-            # Préparer les messages pour l'API
-            api_messages = [{"role": msg["role"], "content": msg["content"]} for msg in conv["messages"]]
-            
-            # Appeler l'API
+            # Appeler l'API OpenRouter
             with st.spinner("⏳ Traitement en cours..."):
-                response = call_claude_api(api_messages, conv["model"], temperature, max_tokens)
+                response = call_openrouter_api(conv["messages"], conv["model"], temperature, max_tokens)
             
             if response:
                 # Ajouter la réponse IA
