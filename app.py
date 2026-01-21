@@ -93,9 +93,13 @@ st.markdown("""
 # Fonction pour appeler OpenRouter API
 def call_openrouter_api(messages: list, model: str, temperature: float, max_tokens: int) -> Optional[str]:
     """Appelle l'API OpenRouter avec les paramètres donnés."""
-    api_key = st.secrets.get("OPENROUTER_API_KEY", "")
+    try:
+        api_key = st.secrets["OPENROUTER_API_KEY"]
+    except (KeyError, AttributeError):
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
     
-    if not api_key:
+    if not api_key or api_key == "":
+        st.error("❌ Clé API OpenRouter non configurée. Vérifiez les secrets Streamlit Cloud.")
         return None
     
     # Mapping des modèles
