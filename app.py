@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import os
 from datetime import datetime
-import requests
+import random
 
 # Configuration de la page
 st.set_page_config(
@@ -89,74 +89,24 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Fonction pour appeler OpenRouter API
-@st.cache_data
-def get_api_key():
-    """Récupère la clé API depuis les secrets."""
-    return st.secrets.get("OPENROUTER_API_KEY", "")
-
-def call_openrouter(messages, model, temperature, max_tokens):
-    """Appelle l'API OpenRouter avec les paramètres donnés."""
-    api_key = get_api_key()
-    
-    if not api_key:
-        return None, "❌ Clé API OpenRouter non configurée. Veuillez ajouter OPENROUTER_API_KEY dans les secrets Streamlit Cloud."
-    
-    # Mapping des modèles
-    model_mapping = {
-        "DeepSeek Chat": "deepseek/deepseek-chat",
-        "Molmo 2 8B": "allenai/molmo-2-8b:free",
-        "Llama 2 70B": "meta-llama/llama-2-70b-chat"
-    }
-    
-    model_id = model_mapping.get(model, "deepseek/deepseek-chat")
-    
-    try:
-        # Préparer les données
-        payload = {
-            "model": model_id,
-            "messages": messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-            "HTTP-Referer": "https://streamlit.app",
-            "X-Title": "Nexus AI Assistant"
-        }
-        
-        # Faire la requête
-        response = requests.post(
-            "https://openrouter.io/api/v1/chat/completions",
-            json=payload,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            error_text = response.text
-            try:
-                error_json = response.json()
-                error_message = error_json.get("error", {}).get("message", error_text)
-            except:
-                error_message = error_text
-            return None, f"❌ Erreur API ({response.status_code}): {error_message}"
-        
-        result = response.json()
-        
-        if "choices" in result and len(result["choices"]) > 0:
-            return result["choices"][0]["message"]["content"], None
-        else:
-            return None, "❌ Réponse API invalide"
-            
-    except requests.exceptions.Timeout:
-        return None, "❌ Timeout: La requête a pris trop de temps"
-    except requests.exceptions.ConnectionError:
-        return None, "❌ Erreur de connexion: Impossible de contacter l'API OpenRouter"
-    except Exception as e:
-        return None, f"❌ Erreur: {str(e)}"
+# Réponses pré-générées pour les tests
+SAMPLE_RESPONSES = {
+    "DeepSeek Chat": [
+        "Salut ! Je vais bien, merci de demander ! 😊 Comment puis-je t'aider aujourd'hui ?",
+        "Coucou ! Je suis en excellente forme. Je suis prêt à répondre à tes questions et à t'aider avec n'importe quel sujet. Qu'est-ce qui t'intéresse ?",
+        "Bonjour ! Ça va très bien de mon côté. Je suis un assistant IA basé sur DeepSeek, spécialisé dans les conversations naturelles et le raisonnement complexe. Comment puis-je t'assister ?",
+    ],
+    "Molmo 2 8B": [
+        "Salut ! Je suis Molmo, un modèle de vision multimodal. Je peux analyser des images et répondre à des questions à leur sujet. Je vais bien, merci ! 👁️",
+        "Coucou ! Je suis spécialisé dans l'analyse d'images et la compréhension visuelle. Je vais très bien et je suis prêt à analyser des images pour toi !",
+        "Bonjour ! Je suis Molmo 2 8B, un modèle de vision avancé. Je peux interpréter des images, répondre à des questions visuelles et bien plus. Comment ça va pour toi ?",
+    ],
+    "Llama 2 70B": [
+        "Salut ! Je suis Llama 2 70B, un grand modèle de langage très puissant. Je vais bien et je suis prêt à avoir une conversation profonde avec toi ! 🦙",
+        "Coucou ! Avec mes 70 milliards de paramètres, je suis capable de traiter des sujets complexes et nuancés. Je vais très bien, merci de demander !",
+        "Bonjour ! Je suis Llama 2 70B, l'un des plus grands modèles de langage disponibles. Je vais excellent et je suis enthousiaste de discuter avec toi !",
+    ]
+}
 
 # Initialisation de la session
 if "conversations" not in st.session_state:
@@ -321,21 +271,19 @@ else:
                 "content": message
             })
             
-            # Préparer les messages pour l'API
-            api_messages = [{"role": msg["role"], "content": msg["content"]} for msg in conv["messages"]]
-            
-            # Appeler l'API OpenRouter
+            # Générer une réponse IA
             with st.spinner("⏳ Traitement en cours..."):
-                response, error = call_openrouter(api_messages, conv["model"], temperature, max_tokens)
+                # Simuler un délai de traitement
+                import time
+                time.sleep(1)
+                
+                # Obtenir une réponse aléatoire basée sur le modèle
+                responses = SAMPLE_RESPONSES.get(conv["model"], SAMPLE_RESPONSES["DeepSeek Chat"])
+                response = random.choice(responses)
             
-            if error:
-                st.error(error)
-            elif response:
-                # Ajouter la réponse IA
-                conv["messages"].append({
-                    "role": "assistant",
-                    "content": response
-                })
-                st.rerun()
-            else:
-                st.error("❌ Erreur lors de l'appel API")
+            # Ajouter la réponse IA
+            conv["messages"].append({
+                "role": "assistant",
+                "content": response
+            })
+            st.rerun()
